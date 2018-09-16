@@ -30,7 +30,7 @@ def createUserTable():
                 spouse integer,
                 lastDiscount integer,
                 lastWeightedScore integer,
-                couponHistory blob
+                couponHistory text
                 )""")
 
 def deleteUserTable():
@@ -52,7 +52,7 @@ def populateCustomerData():
         'User-Agent' : 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/68.0.3440.106 Safari/537.36' }
 
     #Number of times to populate
-    numToPop = 5
+    numToPop = 100
 
     #Filter manually, since it doesn't work when I curl request
     #This takes longer but allows for better granularity anyways
@@ -99,7 +99,7 @@ def populateCustomerData():
             # print (cust["age"])
 
             #Add user to table
-            # c.execute("INSERT INTO customers VALUES(" + query + ")" )
+            c.execute("INSERT INTO customers VALUES(" + query + ")" )
             # print(i)
 
             totalMatched += 1
@@ -154,10 +154,10 @@ def manualLoad():
                 #Add user to table
                 c.execute("INSERT INTO customers VALUES(" + query + ")" )
     
-# deleteUserTable()
-# createUserTable()
-populateCustomerData()
-# manualLoad()
+deleteUserTable()
+createUserTable()
+# populateCustomerData()
+manualLoad()
 
 #Exit 
 conn.commit()

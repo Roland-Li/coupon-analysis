@@ -4,6 +4,8 @@ import tensorflow as tf
 from tensorflow import keras
 import numpy as np
 import math
+import json
+import sys
 
 #__________________________________________________________________________________
 
@@ -23,7 +25,7 @@ c = conn.cursor()
 
 #Theoretically once a month, re-score a customer
 def rateCustomers():
-    c.execute("""SELECT id,lastWeightedScore,lastDiscount,givenName,surName,address FROM customers""")
+    c.execute("""SELECT id,lastWeightedScore,lastDiscount,givenName,surName,address,couponHistory FROM customers""")
 
     #For curl call later
     headers = { 
@@ -75,12 +77,17 @@ def rateCustomers():
                 newScore *= 0.5 #conversion not working
             else:
                 newScore *= 1.1
+        newScore = round(newScore,2)
 
         #If the discount hasn't been set yet, just default it to a ratio
         if row[2] == 0:
             lastDiscount = min(newScore/5 * maxDiscount, maxDiscount)
-            c.execute("UPDATE customers SET lastWeightedScore = ? , lastDiscount = ? WHERE id = ?", (newScore,lastDiscount,row[0]))
+            arr = [lastDiscount, newScore]
+            c.execute("UPDATE customers SET lastWeightedScore = ? , couponHistory = ?, lastDiscount = ? WHERE id = ?", (newScore,json.dumps(arr),lastDiscount,row[0]))
         else:
+            # arr = row[6].append(lastDiscount)
+            # arr.append(newScore)
+
             c.execute("UPDATE customers SET lastWeightedScore = ? WHERE id = ?", (newScore,row[0]))
 
         newFile.write(row[3] + " " + row [4] + ", " + row[5] + ", " + str(newScore) + '\n')
@@ -99,7 +106,10 @@ def rateCustomers():
 #This is what does the training!
 def determineCoupons():
     # model.load_weights('my_model')
-
+    learning_rate = 0.01
+    epochs = 10
+    nSamples = 100
+    
     #Base variables ("normalized" to be approx same value)
     industryV = tf.placeholder(tf.float32)
     salaryV = tf.placeholder(tf.float32) 
@@ -107,6 +117,7 @@ def determineCoupons():
     spouseV = tf.placeholder(tf.float32) 
     lastDiscountV = tf.placeholder(tf.float32)
     lastWeightedScoreV = tf.placeholder(tf.float32)
+    coupon = tf.placeholder(tf.float32)
 
     #Weights
     industryW = tf.Variable(np.random.randn(), name='weights')
@@ -115,15 +126,98 @@ def determineCoupons():
     spouseW =tf.Variable(np.random.randn(), name='weights')
     lastDiscountW = tf.Variable(np.random.randn(), name='weights')
     lastWeightedScoreW = tf.Variable(np.random.randn(), name='weights')
+    bias = tf.Variable(np.random.randn(), name='bias')
 
-    #Seperate out each variable
+    pred = industryW * industryV + salaryW * salaryV + ageW * ageV + spouseW * spouseW + lastDiscountW * lastDiscountV + lastWeightedScoreW * lastWeightedScoreV + bias
+    cost = tf.reduce_sum((pred - coupon)/ (lastWeightedScoreV * nSamples))
+    optimizer = tf.train.GradientDescentOptimizer(learning_rate).minimize(cost)
 
+    init = tf.global_variables_initializer()
 
+    #Seperate out each variable and normalize it
+    c = conn.cursor()
+    c.execute("""SELECT occupationIndustry FROM customers""")
+    occupationIndustry = []
+    i = 0
+    for strings in c.fetchall():
+        occupationIndustry.append((strings[0]-1000)/9000)
+        i += 1
+
+    c.execute("""SELECT salary FROM customers""")
+    salary = []
+    for strings in c.fetchall():
+        salary.append((math.log(strings[0],10)-4)/2)
+
+    c.execute("""SELECT age FROM customers""")
+    age = []
+    for strings in c.fetchall():
+        age.append(strings[0]-18/82)
+
+    c.execute("""SELECT spouse FROM customers""")
+    spouse = []
+    for strings in c.fetchall():
+        spouse.append(strings[0]) #already 0 or 1
+
+    c.execute("""SELECT lastDiscount FROM customers""")
+    lastDiscount = []
+    for strings in c.fetchall():
+        lastDiscount.append(strings[0]/maxDiscount)
+
+    c.execute("""SELECT lastWeightedScore FROM customers""")
+    lastWeightedScore = []
+    for strings in c.fetchall():
+        if strings[0] <= 0:
+            lastWeightedScore.append(0)
+        else:
+            lastWeightedScore.append(math.log(strings[0],10)/2)
+
+    c.execute("""SELECT couponHistory FROM customers""")
+    coupons = []
+    i = 0
+
+    for strings in c.fetchall():
+        row = json.loads(strings[0])
+        sc = row[len(row) - 1] #Last time's Score
+        ds = row[len(row) - 2] #Last time's Discount
+
+        #From best to worst
+        #Reduce discount, increase score = continue
+        #Increase discount, increase score = continue
+        #Reduce discount, reduce score = stop
+        #Increase discount, reduce score = stop
+        # print(sc)
+        # print(ds)
+        # print(lastWeightedScore[i])
+        # print(lastDiscount[i])
+
+        val = (sc - lastWeightedScore[i]) * (ds - lastDiscount[i]) + ds
+        coupons.append(val)
+
+        i += 1
+        
     #Now "normalize" certain variables so they are approx the same value
 
-
     #Now run the algo
+    with tf.Session() as sesh:
+        sesh.run(init)
+        
+        for epoch in range(epochs):
+            for a,b,c,d,e,f,g in zip(occupationIndustry, salary, age, spouse, lastDiscount, lastWeightedScore, coupons):
+                sesh.run(optimizer, feed_dict={industryV: a, salaryV: b, ageV: c, spouseV: d, lastDiscountV: e, lastWeightedScoreV: f, coupon: g})
+            
+                #Add this to the list
+                a = sesh.run(cost, feed_dict={industryV: occupationIndustry, salaryV: salary, ageV: age, spouseV: spouse, lastDiscountV: lastDiscount, lastWeightedScoreV: lastWeightedScore, coupon: coupons})
+                
+                b = sesh.run(industryW)
+                c = sesh.run(salaryW)
+                d = sesh.run(ageW)
+                e = sesh.run (spouseW)
+                f = sesh.run (lastDiscountW)
+                g = sesh.run (lastWeightedScoreW)
+                h = sesh.run(bias)
 
+                sys.stdout.write(f'epoch: {epoch:04d} a={a:.4f} b={b:.4f} c={c:.4f} d={d:.4f} e={e:.4f} f={f:.4f} g={g:.4f} h={h:.4f}' + '\n')
+                sys.stdout.flush()
 
     #Save 
     # model.save_weights('./my_model')
