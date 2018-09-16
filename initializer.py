@@ -1,6 +1,18 @@
 import sqlite3
 import requests
 
+#__________________________________________________________________________________
+
+#Global variables
+
+#Filter Settings
+ageMin = 22
+ageMax = 32
+minIncome = 30000
+maxIncome = 60000
+
+#__________________________________________________________________________________
+
 #Connect
 conn = sqlite3.connect('data.db')
 c = conn.cursor()
@@ -18,7 +30,7 @@ def createUserTable():
                 lastWeightedScore integer,
                 couponHistory blob
                 )""")
-                
+
 def deleteUserTable():
     #Purge and try again later
     c.execute("""DROP TABLE customers""")
@@ -45,12 +57,8 @@ def populateCustomerData():
     #Number of times to populate
     numToPop = 100
 
-    #Filter, since it doesn't work when I curl request
+    #Filter manually, since it doesn't work when I curl request
     #This takes longer but allows for better granularity anyways
-    ageMin = 22
-    ageMax = 32
-    minIncome = 30000
-    maxIncome = 60000
 
     totalMatched = 0
 
@@ -102,6 +110,9 @@ def populateCustomerData():
         data = response.json()
     
     #Finished gathering users
+
+
+
 
     
 
