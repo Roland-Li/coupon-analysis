@@ -81,8 +81,8 @@ def rateCustomers():
 
         #If the discount hasn't been set yet, just default it to a ratio
         if row[2] == 0:
-            lastDiscount = min(newScore/5 * maxDiscount, maxDiscount)
-            arr = [lastDiscount, newScore]
+            lastDiscount = round(min(newScore/5 * maxDiscount, maxDiscount),3)
+            arr = [str(newScore), str(lastDiscount)]
             c.execute("UPDATE customers SET lastWeightedScore = ? , couponHistory = ?, lastDiscount = ? WHERE id = ?", (newScore,json.dumps(arr),lastDiscount,row[0]))
         else:
             # arr = row[6].append(lastDiscount)
@@ -107,7 +107,7 @@ def rateCustomers():
 def determineCoupons():
     # model.load_weights('my_model')
     learning_rate = 0.01
-    epochs = 10
+    epochs = 200
     nSamples = 100
     
     #Base variables ("normalized" to be approx same value)
@@ -129,7 +129,7 @@ def determineCoupons():
     bias = tf.Variable(np.random.randn(), name='bias')
 
     pred = industryW * industryV + salaryW * salaryV + ageW * ageV + spouseW * spouseW + lastDiscountW * lastDiscountV + lastWeightedScoreW * lastWeightedScoreV + bias
-    cost = tf.reduce_sum((pred - coupon)/ (lastWeightedScoreV * nSamples))
+    cost = tf.reduce_sum((pred - coupon) **2) / (2 * nSamples)
     optimizer = tf.train.GradientDescentOptimizer(learning_rate).minimize(cost)
 
     init = tf.global_variables_initializer()
@@ -169,7 +169,12 @@ def determineCoupons():
         if strings[0] <= 0:
             lastWeightedScore.append(0)
         else:
-            lastWeightedScore.append(math.log(strings[0],10)/2)
+            lastWeightedScore.append(strings[0]/10)
+    
+    c.execute("""SELECT id FROM customers""")
+    ids = []
+    for strings in c.fetchall():
+        ids.append(strings[0])
 
     c.execute("""SELECT couponHistory FROM customers""")
     coupons = []
@@ -177,8 +182,8 @@ def determineCoupons():
 
     for strings in c.fetchall():
         row = json.loads(strings[0])
-        sc = row[len(row) - 1] #Last time's Score
-        ds = row[len(row) - 2] #Last time's Discount
+        sc = float(row[len(row) - 2]) #Last time's Score
+        ds = float(row[len(row) - 1]) #Last time's Discount
 
         #From best to worst
         #Reduce discount, increase score = continue
@@ -189,22 +194,36 @@ def determineCoupons():
         # print(ds)
         # print(lastWeightedScore[i])
         # print(lastDiscount[i])
+        val = (sc - lastWeightedScore[i] + 5)/10 * (ds - lastDiscount[i] + maxDiscount)/(maxDiscount*2) + ds
 
-        val = (sc - lastWeightedScore[i]) * (ds - lastDiscount[i]) + ds
         coupons.append(val)
+        sys.stdout.write(str(val) + '\n')
+        sys.stdout.flush()
 
         i += 1
-        
+    
     #Now "normalize" certain variables so they are approx the same value
 
     #Now run the algo
     with tf.Session() as sesh:
         sesh.run(init)
         
+        temp = 0
+        storage = []
+        
         for epoch in range(epochs):
-            for a,b,c,d,e,f,g in zip(occupationIndustry, salary, age, spouse, lastDiscount, lastWeightedScore, coupons):
-                sesh.run(optimizer, feed_dict={industryV: a, salaryV: b, ageV: c, spouseV: d, lastDiscountV: e, lastWeightedScoreV: f, coupon: g})
-            
+            #Terrible variable names because I can
+            i = 0
+            for ai,bi,ci,di,ei,fi,gi,hi in zip(occupationIndustry, salary, age, spouse, lastDiscount, lastWeightedScore, coupons, ids):
+                temp = fi * 10
+                sesh.run(optimizer, feed_dict={industryV: ai, salaryV: bi, ageV: ci, spouseV: di, lastDiscountV: ei, lastWeightedScoreV: fi, coupon: gi})
+
+                if epoch == epochs-1:
+                    storage.append(round(temp,3))
+                    storage.append(round(sesh.run(cost, feed_dict={industryV: occupationIndustry, salaryV: salary, ageV: age, spouseV: spouse, lastDiscountV: lastDiscount, lastWeightedScoreV: lastWeightedScore, coupon: coupons}),3))
+                i += 1
+
+            if epoch % 20 == 0:
                 #Add this to the list
                 a = sesh.run(cost, feed_dict={industryV: occupationIndustry, salaryV: salary, ageV: age, spouseV: spouse, lastDiscountV: lastDiscount, lastWeightedScoreV: lastWeightedScore, coupon: coupons})
                 
@@ -216,8 +235,26 @@ def determineCoupons():
                 g = sesh.run (lastWeightedScoreW)
                 h = sesh.run(bias)
 
-                sys.stdout.write(f'epoch: {epoch:04d} a={a:.4f} b={b:.4f} c={c:.4f} d={d:.4f} e={e:.4f} f={f:.4f} g={g:.4f} h={h:.4f}' + '\n')
+                sys.stdout.write(f'epoch: {epoch:04d} lastWeightedScore={temp:.4f} a={a:.4f} b={b:.4f} c={c:.4f} d={d:.4f} e={e:.4f} f={f:.4f} g={g:.4f} h={h:.4f}' + '\n')
                 sys.stdout.flush()
+        
+        c = conn.cursor()
+        c.execute("""SELECT id,couponHistory FROM customers""")
+   
+        #Open file to save data
+        newFile = open("log.txt", 'a')
+        i = 0 
+        for row in c.fetchall():    
+            print(row[1]) 
+            arr = json.loads(row[1])
+            arr.append(str(storage[i]))
+            i += 1
+            arr.append(str(storage[i]))
+            i += 1
+            print(arr)
+
+            c.execute("UPDATE customers SET couponHistory = ? WHERE id = ?", (str(json.dumps(arr)),row[0]))
+
 
     #Save 
     # model.save_weights('./my_model')

@@ -95,7 +95,8 @@ def populateCustomerData():
             query += str(cust["age"]) + ","
             query += ("0","1")[cust["relationshipStatus"] == "Married"] + ","
 
-            print(query)
+            sys.stdout.write(query)
+            sys.stdout.flush()
             # print (cust["age"])
 
             #Add user to table
