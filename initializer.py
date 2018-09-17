@@ -54,9 +54,6 @@ def populateCustomerData():
     #Number of times to populate
     numToPop = 100
 
-    #Filter manually, since it doesn't work when I curl request
-    #This takes longer but allows for better granularity anyways
-
     totalMatched = 0
 
     while totalMatched < numToPop:
@@ -85,7 +82,6 @@ def populateCustomerData():
             address += cust["addresses"]["principalResidence"]["municipality"] + " "
             address += cust["addresses"]["principalResidence"]["province"] + ", "
             address += cust["addresses"]["principalResidence"]["postalCode"]
-            
             query = "'" + cust["id"] + "'" + ","
             query += "'" + cust["givenName"] + "'" + ","
             query += "'" + cust["surname"] + "'" + ","
@@ -94,13 +90,24 @@ def populateCustomerData():
             query += str(round(cust["totalIncome"])) + ","
             query += str(cust["age"]) + ","
             query += ("0","1")[cust["relationshipStatus"] == "Married"] + ","
+    
 
+            #New user default starter
+            query += "0,"
+            query += "0,"
+            query += "null"
+
+            # print (cust["age"])
+
+            #Add user to table
+            c.execute("INSERT INTO customers VALUES(" + query + ")" )
+    
             sys.stdout.write(query)
             sys.stdout.flush()
             # print (cust["age"])
 
             #Add user to table
-            c.execute("INSERT INTO customers VALUES(" + query + ")" )
+            c.execute("INSERT INTO customers VALUES(" + query + ")")
             # print(i)
 
             totalMatched += 1
